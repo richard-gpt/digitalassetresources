@@ -21,7 +21,7 @@ const TIME_RANGES = [
 
 export default function PriceChart({ coin, priceData, onClose }) {
   const [selectedRange, setSelectedRange] = useState(7);
-  const { data, loading, error } = useHistoricalPrices(coin.coinId, selectedRange);
+  const { data, loading, error, retry } = useHistoricalPrices(coin.coinId, selectedRange);
 
   const priceChange = data.length > 1
     ? ((data[data.length - 1].price - data[0].price) / data[0].price) * 100
@@ -104,12 +104,22 @@ export default function PriceChart({ coin, priceData, onClose }) {
           {/* Chart */}
           <div className="h-64 mb-4">
             {loading ? (
-              <div className="h-full flex items-center justify-center">
+              <div className="h-full flex flex-col items-center justify-center gap-2">
                 <div className="w-8 h-8 border-2 border-crypto-accent border-t-transparent rounded-full animate-spin" />
+                <span className="text-crypto-muted text-sm">Loading chart data...</span>
               </div>
             ) : error ? (
-              <div className="h-full flex items-center justify-center text-crypto-red">
-                {error}
+              <div className="h-full flex flex-col items-center justify-center gap-3">
+                <svg className="w-12 h-12 text-crypto-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <p className="text-crypto-muted text-sm text-center max-w-xs">{error}</p>
+                <button
+                  onClick={retry}
+                  className="px-4 py-2 bg-crypto-accent text-white rounded-lg hover:bg-blue-600 transition-colors text-sm"
+                >
+                  Retry
+                </button>
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">

@@ -3,11 +3,15 @@ import { getCachedCoinList, cacheCoinList } from './storage';
 
 const BASE_URL = 'https://api.coingecko.com/api/v3';
 
-// Simple rate limiting - track last request time
+// Rate limiting - CoinGecko free tier is strict
 let lastRequestTime = 0;
-const MIN_REQUEST_INTERVAL = 1500; // 1.5 seconds between requests
+const MIN_REQUEST_INTERVAL = 3000; // 3 seconds between requests
 
-async function rateLimitedRequest(url, params = {}) {
+// Simple in-memory cache for historical data
+const historicalCache = new Map();
+const HISTORICAL_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+async function rateLimitedRequest(url, params = {}, retries = 3) {
   const now = Date.now();
   const timeSinceLastRequest = now - lastRequestTime;
 
@@ -19,18 +23,36 @@ async function rateLimitedRequest(url, params = {}) {
 
   lastRequestTime = Date.now();
 
-  try {
-    const response = await axios.get(url, { params });
-    return response.data;
-  } catch (error) {
-    if (error.response?.status === 429) {
-      // Rate limited - wait and retry once
-      await new Promise(resolve => setTimeout(resolve, 60000));
-      const response = await axios.get(url, { params });
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const response = await axios.get(url, {
+        params,
+        timeout: 10000,
+      });
       return response.data;
+    } catch (error) {
+      const status = error.response?.status;
+
+      // Rate limited - wait and retry
+      if (status === 429) {
+        const waitTime = Math.min(30000, 5000 * Math.pow(2, attempt));
+        console.log(`Rate limited, waiting ${waitTime}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        continue;
+      }
+
+      // Server error - retry with backoff
+      if (status >= 500 && attempt < retries - 1) {
+        const waitTime = 2000 * Math.pow(2, attempt);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        continue;
+      }
+
+      throw error;
     }
-    throw error;
   }
+
+  throw new Error('Max retries exceeded');
 }
 
 /**
@@ -80,6 +102,14 @@ export async function getMarketData(coinIds) {
  * @param {number} days - Number of days (1, 7, 30, 90, 365)
  */
 export async function getHistoricalData(coinId, days = 7) {
+  // Check cache first
+  const cacheKey = `${coinId}-${days}`;
+  const cached = historicalCache.get(cacheKey);
+
+  if (cached && Date.now() - cached.timestamp < HISTORICAL_CACHE_TTL) {
+    return cached.data;
+  }
+
   const data = await rateLimitedRequest(
     `${BASE_URL}/coins/${coinId}/market_chart`,
     {
@@ -88,12 +118,24 @@ export async function getHistoricalData(coinId, days = 7) {
     }
   );
 
+  if (!data || !data.prices || !Array.isArray(data.prices)) {
+    throw new Error('Invalid response from API');
+  }
+
   // Transform data for charts
-  return data.prices.map(([timestamp, price]) => ({
+  const transformed = data.prices.map(([timestamp, price]) => ({
     timestamp,
     price,
     date: new Date(timestamp).toLocaleDateString(),
   }));
+
+  // Cache the result
+  historicalCache.set(cacheKey, {
+    data: transformed,
+    timestamp: Date.now(),
+  });
+
+  return transformed;
 }
 
 /**

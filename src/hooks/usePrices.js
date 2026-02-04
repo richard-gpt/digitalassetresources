@@ -88,41 +88,37 @@ export function useHistoricalPrices(coinId, days = 7) {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [retryCount, setRetryCount] = useState(0);
 
-  useEffect(() => {
+  const fetchData = useCallback(async () => {
     if (!coinId) {
       setData([]);
       return;
     }
 
-    let mounted = true;
-
-    async function fetchData() {
-      try {
-        setLoading(true);
-        setError(null);
-        const historical = await getHistoricalData(coinId, days);
-        if (mounted) {
-          setData(historical);
-        }
-      } catch (err) {
-        if (mounted) {
-          setError('Failed to load chart data');
-          console.error('Error fetching historical data:', err);
-        }
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
-      }
+    try {
+      setLoading(true);
+      setError(null);
+      const historical = await getHistoricalData(coinId, days);
+      setData(historical);
+    } catch (err) {
+      console.error('Error fetching historical data:', err);
+      const message = err.response?.status === 429
+        ? 'Rate limited by API. Please wait a moment and try again.'
+        : 'Failed to load chart data. Click to retry.';
+      setError(message);
+    } finally {
+      setLoading(false);
     }
-
-    fetchData();
-
-    return () => {
-      mounted = false;
-    };
   }, [coinId, days]);
 
-  return { data, loading, error };
+  useEffect(() => {
+    fetchData();
+  }, [fetchData, retryCount]);
+
+  const retry = useCallback(() => {
+    setRetryCount(c => c + 1);
+  }, []);
+
+  return { data, loading, error, retry };
 }
